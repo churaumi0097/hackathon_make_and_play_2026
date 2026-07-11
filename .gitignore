@@ -1,0 +1,78 @@
+<<<<<<< HEAD
+<<<<<<< HEAD
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+=======
+=======
+>>>>>>> 5df0d87a4e69171a3ca32cd381bb5053a857d4ac
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# 環境変数・シークレット
+.env
+*.env
+!.env.example
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+
+# Next.js / Node
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+.DS_Store
+npm-debug.log*
+
+<<<<<<< HEAD
+>>>>>>> 5df0d87 (second commit)
+=======
+>>>>>>> 5df0d87a4e69171a3ca32cd381bb5053a857d4ac
