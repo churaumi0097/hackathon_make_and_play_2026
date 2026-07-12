@@ -71,7 +71,7 @@ export default function RouteMapSVG({
       <polyline
         points={shortLine}
         fill="none"
-        stroke="var(--cold)"
+        stroke="#2f80ed"
         strokeOpacity={detourActive ? 0.5 : 0.95}
         strokeWidth={detourActive ? 2.5 : 5}
         strokeDasharray="2 8"
@@ -84,14 +84,14 @@ export default function RouteMapSVG({
         fill="none"
         stroke="var(--ember)"
         strokeOpacity={detourActive ? 1 : 0.4}
-        strokeWidth={detourActive ? 6 : 3}
+        strokeWidth={detourActive ? 5 : 3}
         strokeLinecap="round"
         strokeLinejoin="round"
         filter={detourActive ? "url(#glow)" : undefined}
       />
 
       {/* 経由スポット */}
-      {route.spots.map((s, i) => {
+      {route.spots.filter((s) => s.place_id !== "dummy-afterglow-pin").map((s, i) => {
         const [x, y] = project(s);
         return (
           <g key={s.place_id || i}>

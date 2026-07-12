@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import EmotionInput, { type EmotionSubmit } from "./components/EmotionInput";
 import LoadingScreen from "./components/LoadingScreen";
 import MapNav from "./components/MapNav";
-import ResultScreen from "./components/ResultScreen";
+import ResultScreen from "./components/ResultScreenV2";
 import { fetchGeocode, fetchHealth, fetchRoute } from "./lib/api";
 import type { RouteResponse } from "./lib/types";
 import styles from "./page.module.css";
@@ -46,13 +46,13 @@ export default function Home() {
 
   if (phase === "landing") return <LandingPage onStart={() => setPhase("input")} />;
   if (phase === "nav" && route) return <><HealthBadge health={health} /><MapNav route={route} onArrive={(minutes) => { setExtraMinutes(minutes); setPhase("result"); }} onRestart={handleRestart} /></>;
+  if (phase === "result" && route) return <><HealthBadge health={health} /><ResultScreen route={route} extraMinutes={extraMinutes} onRestart={handleRestart} /></>;
 
   return (
     <AppFrame onHome={() => setPhase("landing")} panelMode={formStep === 1 ? "route" : "mood"}>
       <HealthBadge health={health} />
       {phase === "input" && <EmotionInput onSubmit={handleSubmit} onStepChange={setFormStep} />}
       {phase === "loading" && <LoadingScreen error={error} />}
-      {phase === "result" && route && <ResultScreen route={route} emotionText={emotionText} extraMinutes={extraMinutes} onRestart={handleRestart} />}
       {phase === "loading" && error && <div className="safe-exit"><button className="btn btn-ghost" onClick={handleRestart}>入力に戻る</button></div>}
     </AppFrame>
   );

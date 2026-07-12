@@ -56,8 +56,8 @@ export default function ResultScreen({
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, CARD_W, CARD_H);
       const rg = ctx.createRadialGradient(CARD_W / 2, 80, 40, CARD_W / 2, 80, 760);
-      rg.addColorStop(0, "rgba(0,177,79,0.12)");
-      rg.addColorStop(1, "rgba(0,177,79,0)");
+      rg.addColorStop(0, "rgba(233,76,53,0.12)");
+      rg.addColorStop(1, "rgba(233,76,53,0)");
       ctx.fillStyle = rg;
       ctx.fillRect(0, 0, CARD_W, CARD_H);
 
@@ -65,12 +65,12 @@ export default function ResultScreen({
       ctx.textBaseline = "top";
 
       // eyebrow
-      ctx.fillStyle = "#00b14f";
+      ctx.fillStyle = "#e94c35";
       ctx.font = "700 30px 'Hiragino Sans','Noto Sans JP',sans-serif";
       ctx.fillText("A N T I - S H O R T C U T", pad, 90);
 
       // 大見出し：＋N分
-      ctx.fillStyle = "#00b14f";
+      ctx.fillStyle = "#e94c35";
       ctx.font = "800 200px 'Hiragino Sans','Noto Sans JP',sans-serif";
       ctx.fillText(`＋${extraMinutes}`, pad, 150);
       const numW = ctx.measureText(`＋${extraMinutes}`).width;
@@ -80,7 +80,7 @@ export default function ResultScreen({
 
       ctx.fillStyle = "#16181c";
       ctx.font = "800 62px 'Hiragino Sans','Noto Sans JP',sans-serif";
-      ctx.fillText("今日も、意外とがんばった。", pad, 410);
+      ctx.fillText("今日も、本当におつかれさまでした。", pad, 410);
 
       // 区切り線
       ctx.strokeStyle = "rgba(16,24,40,0.10)";
@@ -102,7 +102,7 @@ export default function ResultScreen({
       ctx.fillStyle = "#98a2ad";
       ctx.font = "600 34px 'Hiragino Sans',sans-serif";
       ctx.fillText(`${route.emotion.route_theme}`, pad, CARD_H - 130);
-      ctx.fillStyle = "#00b14f";
+      ctx.fillStyle = "#e94c35";
       ctx.font = "700 34px 'Hiragino Sans',sans-serif";
       ctx.fillText(`${SHARE_HASHTAG}　人類のための遠回りマップ`, pad, CARD_H - 80);
     },
@@ -116,7 +116,7 @@ export default function ResultScreen({
   }, [result, drawCard]);
 
   const shareText = result
-    ? `今日も、意外とがんばった。\n最短より＋${extraMinutes}分、自分のために歩いた。\n${result.message} ${SHARE_HASHTAG}`
+    ? `今日も、本当におつかれさまでした。\n＋${extraMinutes}分、自分のためにゆっくり歩けました。\n${result.message} ${SHARE_HASHTAG}`
     : "";
 
   const canvasToBlob = (): Promise<Blob | null> =>
@@ -163,9 +163,9 @@ export default function ResultScreen({
   };
 
   return (
-    <div className="shell" style={{ padding: "34px 22px 44px" }}>
+    <div className="shell" style={{ padding: "34px 22px 44px", alignItems: "center", textAlign: "center" }}>
       {/* 主役：自己肯定のひとこと（アオイ向け） */}
-      <div className="fade-in" style={{ margin: "6px 0 4px" }}>
+      <div className="fade-in" style={{ width: "100%", margin: "6px 0 4px" }}>
         <div style={{ fontSize: 34, marginBottom: 10 }} aria-hidden>
           🌙✨
         </div>
@@ -179,9 +179,9 @@ export default function ResultScreen({
             color: "var(--ink)",
           }}
         >
-          今日も、意外と
+          おつかれさまでした。
           <br />
-          がんばったじゃん。
+          今日も、よく歩きましたね。
         </h1>
       </div>
 
@@ -191,6 +191,7 @@ export default function ResultScreen({
         style={{
           display: "flex",
           alignItems: "baseline",
+          justifyContent: "center",
           gap: 10,
           margin: "22px 0 6px",
         }}
@@ -216,13 +217,13 @@ export default function ResultScreen({
           lineHeight: 1.7,
         }}
       >
-        最短より、それだけ長く歩いた。
+        遠回りしたぶんだけ、今日の景色をゆっくり味わえました。
         <br />
-        効率じゃなくて、自分のために使った時間。
+        自分のために歩いた時間、本当におつかれさまでした。
       </p>
 
       {/* Gemini メッセージ */}
-      <div className="card fade-in" style={{ padding: 22, minHeight: 120 }}>
+      <div className="card fade-in" style={{ width: "100%", padding: 22, minHeight: 120 }}>
         {!result && !error && (
           <p style={{ color: "var(--ink-faint)", margin: 0 }}>
             言葉を、選んでいます…
@@ -244,13 +245,13 @@ export default function ResultScreen({
       </div>
 
       {/* 拾いもの（通過スポット） */}
-      {route.spots.length > 0 && (
-        <div className="fade-in" style={{ marginTop: 28 }}>
+      {route.spots.some((spot) => spot.place_id !== "dummy-afterglow-pin") && (
+        <div className="fade-in" style={{ width: "100%", marginTop: 28 }}>
           <h2 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 12px", color: "var(--ink)" }}>
             今日、出会えた場所
           </h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {route.spots.map((s, i) => (
+            {route.spots.filter((spot) => spot.place_id !== "dummy-afterglow-pin").map((s, i) => (
               <div
                 key={s.place_id || i}
                 className="card"
@@ -258,14 +259,15 @@ export default function ResultScreen({
                   padding: "16px 18px",
                   display: "flex",
                   alignItems: "center",
+                  justifyContent: "center",
                   gap: 14,
                 }}
               >
                 <span style={{ fontSize: 22 }}>✨</span>
-                <div style={{ flex: 1 }}>
+                <div>
                   <div style={{ fontSize: 17, color: "var(--ink)" }}>{s.name}</div>
                   <div style={{ fontSize: 14, color: "var(--ink-muted)", marginTop: 2 }}>
-                    寄り道しなきゃ、通らなかった場所。
+                    今日のあなたが、ゆっくり出会えた場所。
                   </div>
                 </div>
               </div>
@@ -275,9 +277,9 @@ export default function ResultScreen({
       )}
 
       {/* シェアカード プレビュー */}
-      <div className="fade-in" style={{ marginTop: 30 }}>
+      <div className="fade-in" style={{ width: "100%", marginTop: 30 }}>
         <h2 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 12px", color: "var(--ink)" }}>
-          がんばりを、残そう
+          今日歩いた時間を、思い出に
         </h2>
         <div
           className="card"
@@ -290,14 +292,14 @@ export default function ResultScreen({
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
+      <div style={{ display: "flex", justifyContent: "center", width: "100%", gap: 10, marginTop: 22 }}>
         <button
           className="btn"
           style={{ flex: 2, minHeight: 62, fontSize: 18 }}
           onClick={handleShare}
           disabled={!result}
         >
-          Xで自慢する
+          今日の寄り道をシェア
         </button>
         <button
           className="btn-ghost"

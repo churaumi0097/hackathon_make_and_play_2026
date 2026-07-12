@@ -16,8 +16,10 @@ import {
 } from "@vis.gl/react-google-maps";
 import RouteMapSVG from "./RouteMapSVG";
 import type { LatLng, RouteResponse } from "../lib/types";
+import styles from "./MapNav.module.css";
 
 const BROWSER_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY ?? "";
+const AFTERGLOW_PLACE_ID = "dummy-afterglow-pin";
 
 // 実地図に重ねる polyline / marker を命令的に描画する内部コンポーネント。
 function GoogleOverlays({
@@ -43,23 +45,23 @@ function GoogleOverlays({
 
     const shortest = new google.maps.Polyline({
       path: route.shortest.path,
-      strokeColor: "#aab2bd",
+      strokeColor: "#2f80ed",
       strokeOpacity: detourActive ? 0.7 : 0.95,
       strokeWeight: detourActive ? 4 : 7,
       map,
     });
     const detour = new google.maps.Polyline({
       path: route.detour.path,
-      strokeColor: "#00b14f",
+      strokeColor: "#e94c35",
       strokeOpacity: detourActive ? 1 : 0.4,
-      strokeWeight: detourActive ? 8 : 4,
+      strokeWeight: detourActive ? 6 : 3,
       map,
     });
     overlaysRef.current.push(shortest, detour);
 
     const infoWindow = new google.maps.InfoWindow();
 
-    route.spots.forEach((s) => {
+    route.spots.filter((s) => s.place_id !== AFTERGLOW_PLACE_ID).forEach((s) => {
       const m = new google.maps.Marker({
         position: { lat: s.lat, lng: s.lng },
         map,
@@ -67,7 +69,7 @@ function GoogleOverlays({
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
           scale: 7,
-          fillColor: "#00b14f",
+          fillColor: "#e94c35",
           fillOpacity: 1,
           strokeColor: "#ffffff",
           strokeWeight: 3,
@@ -162,6 +164,38 @@ function GoogleOverlays({
   return null;
 }
 
+export function RouteMapView({
+  route,
+  active = "detour",
+  current = null,
+}: {
+  route: RouteResponse;
+  active?: "shortest" | "detour";
+  current?: LatLng | null;
+}) {
+  const [mapsFailed, setMapsFailed] = useState(false);
+  const center = route.detour.path[Math.floor(route.detour.path.length / 2)];
+
+  if (!BROWSER_KEY || mapsFailed) {
+    return <RouteMapSVG route={route} active={active} current={current} />;
+  }
+
+  return (
+    <APIProvider apiKey={BROWSER_KEY} onError={() => setMapsFailed(true)}>
+      <Map
+        defaultCenter={center}
+        defaultZoom={15}
+        colorScheme={ColorScheme.LIGHT}
+        disableDefaultUI
+        gestureHandling="greedy"
+        style={{ width: "100%", height: "100%" }}
+      >
+        <GoogleOverlays route={route} active={active} current={current} />
+      </Map>
+    </APIProvider>
+  );
+}
+
 export default function MapNav({
   route,
   onArrive,
@@ -174,6 +208,7 @@ export default function MapNav({
 }) {
   const [active, setActive] = useState<"shortest" | "detour">("detour");
   const [current, setCurrent] = useState<LatLng | null>(null);
+  const [spotIndex, setSpotIndex] = useState(0);
 
   // 現在地トラッキング
   useEffect(() => {
@@ -189,12 +224,12 @@ export default function MapNav({
   // 到着時の「感情に使った時間」：遠回り継続なら差分、最短に切替済みなら 0。
   const actualExtra = active === "detour" ? route.extra_minutes : 0;
 
-  const center = route.detour.path[Math.floor(route.detour.path.length / 2)];
-
   const activeLeg = active === "detour" ? route.detour : route.shortest;
+  const visibleSpots = route.spots.filter((spot) => spot.place_id !== AFTERGLOW_PLACE_ID);
 
   return (
     <div
+      className={styles.mapPage}
       style={{
         position: "relative",
         width: "100%",
@@ -204,29 +239,13 @@ export default function MapNav({
       }}
     >
       {/* 地図本体（全画面フルブリード） */}
-      <div style={{ position: "absolute", inset: 0, zIndex: 0 }}>
-        {BROWSER_KEY ? (
-          <APIProvider apiKey={BROWSER_KEY}>
-            <Map
-              defaultCenter={center}
-              defaultZoom={15}
-              colorScheme={ColorScheme.LIGHT}
-              disableDefaultUI
-              gestureHandling="greedy"
-              style={{ width: "100%", height: "100%" }}
-            >
-              <GoogleOverlays route={route} active={active} current={current} />
-            </Map>
-          </APIProvider>
-        ) : (
-          <div style={{ width: "100%", height: "100%" }}>
-            <RouteMapSVG route={route} active={active} current={current} />
-          </div>
-        )}
+      <div className={styles.mapCanvas} style={{ position: "absolute", inset: 0, zIndex: 0 }}>
+        <RouteMapView route={route} active={active} current={current} />
       </div>
 
       {/* 上部：フローティングのテーマカード（中央寄せ） */}
       <div
+        className={styles.sideTop}
         style={{
           position: "absolute",
           top: 0,
@@ -240,7 +259,7 @@ export default function MapNav({
         }}
       >
         <div
-          className="floating-card"
+          className={`floating-card ${styles.sideCard}`}
           style={{ width: "100%", maxWidth: 560, padding: "14px 18px" }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -279,7 +298,46 @@ export default function MapNav({
       </div>
 
       {/* 下部：Grab風ボトムシート（中央寄せ・角丸・ハンドル） */}
+      {visibleSpots.length > 0 && (
+        <section className={styles.spotCarousel} aria-label="今回の寄りたいポイント">
+          <div className={styles.spotHeading}>
+            <div>
+              <span>DETOUR SPOT</span>
+              <h2>今回の寄りたいポイント</h2>
+            </div>
+            <span className={styles.spotCount}>{spotIndex + 1} / {visibleSpots.length}</span>
+          </div>
+          <div className={styles.spotViewport}>
+            <div className={styles.spotTrack} style={{ transform: `translateX(-${spotIndex * 100}%)` }}>
+              {visibleSpots.map((spot) => (
+                <article className={styles.spotCard} key={spot.place_id || spot.name}>
+                  <span className={styles.spotPin} aria-hidden="true">●</span>
+                  <div>
+                    <h3>{spot.name}</h3>
+                    {spot.rating > 0 ? (
+                      <p>評価: <strong>★ {spot.rating.toFixed(1)}</strong>（{spot.user_ratings_total}件のレビュー）</p>
+                    ) : (
+                      <p>ルート上のおすすめポイント</p>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+          {visibleSpots.length > 1 && (
+            <div className={styles.spotControls}>
+              <button type="button" onClick={() => setSpotIndex((index) => (index - 1 + visibleSpots.length) % visibleSpots.length)} aria-label="前のポイント">←</button>
+              <div className={styles.spotDots} aria-hidden="true">
+                {visibleSpots.map((spot, index) => <span className={index === spotIndex ? styles.activeDot : ""} key={spot.place_id || `${spot.name}-${index}`} />)}
+              </div>
+              <button type="button" onClick={() => setSpotIndex((index) => (index + 1) % visibleSpots.length)} aria-label="次のポイント">→</button>
+            </div>
+          )}
+        </section>
+      )}
+
       <div
+        className={styles.sideBottom}
         style={{
           position: "absolute",
           bottom: 0,
@@ -291,7 +349,7 @@ export default function MapNav({
         }}
       >
         <div
-          className="sheet"
+          className={`sheet ${styles.sideSheet}`}
           style={{
             width: "100%",
             maxWidth: 560,
@@ -316,8 +374,8 @@ export default function MapNav({
 
           {/* 到着（デモ：実歩行の代わりに到着を宣言） */}
           <button
-            className="btn"
-            style={{ minHeight: 60, fontSize: 18 }}
+            className={`btn ${styles.arriveButton}`}
+            style={{ minHeight: 48, fontSize: 15 }}
             onClick={() => onArrive(actualExtra)}
           >
             目的地についた
@@ -325,18 +383,18 @@ export default function MapNav({
 
           {/* 常設の安全導線：最短で帰る（1タップ） */}
           <div style={{ display: "flex", gap: 10 }}>
-            <button
-              className="btn-danger"
-              style={{ flex: 1, minHeight: 54, fontSize: 16 }}
-              onClick={() => setActive("shortest")}
-              disabled={active === "shortest"}
-            >
-              {active === "shortest" ? "最短に切り替えたよ" : "最短で帰る"}
-            </button>
-            {active === "shortest" && (
+            {active === "detour" ? (
               <button
-                className="btn-ghost"
-                style={{ flex: 1, minHeight: 54 }}
+                className={`btn-danger ${styles.shortestButton}`}
+                style={{ flex: 1, minHeight: 44, fontSize: 14 }}
+                onClick={() => setActive("shortest")}
+              >
+                最短で帰る
+              </button>
+            ) : (
+              <button
+                className={`btn-ghost ${styles.detourButton}`}
+                style={{ flex: 1, minHeight: 44, fontSize: 14 }}
                 onClick={() => setActive("detour")}
               >
                 遠回りに戻す
