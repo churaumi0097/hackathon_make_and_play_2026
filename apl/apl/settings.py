@@ -19,12 +19,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------------------
 # 環境変数（.env）読み込み。シークレットはすべてここから取得する。
-# .env は apl/ 直下（manage.py と同じ階層）に置く想定。
+# .env はリポジトリ直下に置き、フロントエンドと共有する。
 # ---------------------------------------------------------------------------
 env = environ.Env(
     DEBUG=(bool, True),
 )
-environ.Env.read_env(BASE_DIR / ".env")
+environ.Env.read_env(BASE_DIR.parent / ".env")
 
 
 # Quick-start development settings - unsuitable for production

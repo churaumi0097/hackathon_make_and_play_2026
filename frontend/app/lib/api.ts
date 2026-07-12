@@ -8,8 +8,9 @@ import type {
   RouteResponse,
 } from "./types";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api";
+// ブラウザからDjangoへ直接接続せず、Next.jsの同一オリジンプロキシを使う。
+// これにより本番のCORS、HTTPS mixed-content、ビルド時NEXT_PUBLIC_*依存を避ける。
+const API_BASE = "/api/backend";
 
 async function postJSON<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {

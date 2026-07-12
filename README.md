@@ -1,44 +1,3 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
-
-## Getting Started
-
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-=======
-=======
->>>>>>> 5df0d87a4e69171a3ca32cd381bb5053a857d4ac
 # Anti-ShortCut ／ 人類のための遠回りマップ
 
 AIが提示する最短ルートをあえて拒否し、いまの「感情」に寄り添う“意味のある遠回り”を
@@ -55,7 +14,7 @@ AIが提示する最短ルートをあえて拒否し、いまの「感情」に
 | フロントエンド | Next.js 16（App Router / React / TypeScript） | [`frontend/`](frontend) |
 
 外部 API：Gemini（感情解析・メッセージ生成）、Google Places / Directions（スポット選定・ルート）。
-**API キーはすべてサーバー側（`apl/.env`）で管理し、フロントには出しません。**
+環境変数はリポジトリ直下の **`.env` 1ファイル** で管理します（Gitには含めません）。
 地図表示用の Google Maps *ブラウザキー* だけは性質上ブラウザに露出するため、Places/Directions
 用のサーバーキーとは別に用意し、リファラ制限をかけてください（未設定でも SVG 地図で動きます）。
 
@@ -64,14 +23,14 @@ AIが提示する最短ルートをあえて拒否し、いまの「感情」に
 ### 1. バックエンド（Django + DRF）
 
 ```bash
+# リポジトリ直下の .env に必要な変数を設定
 cd apl
-cp .env.example .env          # 必要に応じてキーを設定（未設定でもフォールバックで動作）
 uv sync
 uv run python manage.py migrate
 uv run python manage.py runserver 8000
 ```
 
-`.env`（`apl/.env`）で設定できるキー：
+リポジトリ直下の `.env` で設定できるバックエンド用キー：
 
 | 変数 | 用途 |
 |------|------|
@@ -87,16 +46,15 @@ uv run python manage.py runserver 8000
 
 ```bash
 cd frontend
-cp .env.local.example .env.local   # NEXT_PUBLIC_ のみ（露出前提の値だけ）
 npm install
 npm run dev                        # http://localhost:3000
 ```
 
-`.env.local`：
+同じルート `.env` に設定するフロントエンド用変数：
 
 | 変数 | 用途 |
 |------|------|
-| `NEXT_PUBLIC_API_BASE` | バックエンド API（既定 `http://localhost:8000/api`） |
+| `BACKEND_API_URL` | Next.jsプロキシから接続するバックエンドURL（ローカル既定 `http://localhost:8000`） |
 | `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` | 地図表示専用のブラウザキー。未設定なら SVG フォールバック地図 |
 
 ## API エンドポイント
@@ -131,7 +89,12 @@ npm run dev                        # http://localhost:3000
 - `manage.py` は `apl/` 内にあります（実行パスに注意）。
 - モデル変更時は `makemigrations` → `migrate`。
 - 感情テキスト・位置情報は機微データ。ローカル保持を基本とし、LLM 送信は必要最小限。
-<<<<<<< HEAD
->>>>>>> 5df0d87 (second commit)
-=======
->>>>>>> 5df0d87a4e69171a3ca32cd381bb5053a857d4ac
+
+## Google Cloud へデプロイするとき
+
+- フロントエンドサービスのルートディレクトリは **`frontend`** に設定する。リポジトリ直下には `package.json` がないため、直下をNodeアプリとしてビルドしない。
+- バックエンドサービスのルートディレクトリは **`apl`** に設定する。
+- フロントエンドの実行時環境変数 `BACKEND_API_URL` に、Djangoサービスの公開HTTPS URLを設定する（例: `https://backend-xxxxx.a.run.app`）。
+- Django側には `GOOGLE_MAPS_SERVER_KEY`、`GEMINI_API_KEY`、`DEBUG=False`、`ALLOWED_HOSTS` を設定する。
+- Google Maps JavaScript APIを使う場合、`NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` はNext.jsのビルド時に設定し、キーのHTTPリファラー制限へ本番フロントエンドURLを追加する。
+- `frontend/public` はフロントエンドのソースと一緒にデプロイする。画像URLは `/anti-shortcut-hero-v7.png` のように `/` 始まりで参照する。

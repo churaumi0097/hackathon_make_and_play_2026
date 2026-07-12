@@ -16,7 +16,6 @@ type Health = "checking" | "ok" | "down";
 export default function Home() {
   const [phase, setPhase] = useState<Phase>("landing");
   const [route, setRoute] = useState<RouteResponse | null>(null);
-  const [emotionText, setEmotionText] = useState("");
   const [extraMinutes, setExtraMinutes] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [health, setHealth] = useState<Health>("checking");
@@ -27,7 +26,6 @@ export default function Home() {
   }, []);
 
   const handleSubmit = async (value: EmotionSubmit) => {
-    setEmotionText(value.text);
     setError(null);
     setPhase("loading");
     try {
