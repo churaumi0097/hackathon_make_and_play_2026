@@ -70,9 +70,18 @@ def route(request):
         origin, destination, analysis.places_tags, ctx,
         target_extra_minutes=target_extra,
     )
+    # ダミーの余韻ピンがあれば一旦リストから退避させる
+    dummy_spot = None
+    if spots and spots[-1].get("place_id") == "dummy-afterglow-pin":
+        dummy_spot = spots.pop()
+
     # 夜間は経由スポットを 1 件までに絞る（安全側）。
     max_spots = 1 if ctx.is_night else profile["poi_count"]
     spots = spots[:max_spots]
+
+    # 退避させておいた余韻ピンを最後尾に戻す
+    if dummy_spot:
+        spots.append(dummy_spot)
 
     # 5) ルート算出（最短＋遠回り＋差分）
     routes = directions.build_routes(origin, destination, spots)

@@ -1,16 +1,14 @@
-"""スポット選定（docs/spot_selection「2. アンチ量産型フィルタリング」）。
+"""スポット選定（最短ルート沿い探索 ＆ 徹底ノイズ排除フィルタ）。
 
-Places API で現在地〜目的地の周辺を探索し、
-「open_now かつ 量産型でない“知る人ぞ知る”」スポットを 1〜2 件選ぶ。
-
-閾値はすべて先頭の定数に集約し、調整可能にする。
-Google Maps サーバーキー未設定時は、決め打ちのフォールバック経由地を返す
-（オフラインでも一連のフローが通るようにするため）。
+1. Directions API で実際の徒歩ルート（最短）を引く
+2. そのルート上の 35% 地点、75% 地点を中心に Places API で検索する
+3. 病院、会社、不動産などの「エモくない雑居ビル」を名前で弾く
 """
 
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import asdict, dataclass
 
 import requests
@@ -20,32 +18,26 @@ from . import safety
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# 調整可能な選定閾値（アンチ量産型フィルタ）
-# ---------------------------------------------------------------------------
-
-# 探索半径（メートル）。現在地〜目的地の中点まわりを探す。
-SEARCH_RADIUS_M = 1200
-
-# 「量産型（メジャーすぎ）」を弾く上限。これを超える口コミ数は除外。
+# --- 調整可能な選定閾値 ---
+SEARCH_RADIUS_M = 400  # ルート上から探すので、半径は400m程度で十分届く
 MAX_USER_RATINGS_TOTAL = 800
-
-# 「知る人ぞ知る」を担保する下限。口コミが少なすぎる（＝実体不明）も避ける。
-MIN_USER_RATINGS_TOTAL = 5
-
-# rating の下限。これ未満は“外れ”として除外。
+MIN_USER_RATINGS_TOTAL = 3  # 個人商店は口コミが少ないので下限を下げる
 MIN_RATING = 3.6
 
-# 最終的に採用するスポット数の範囲。
-MIN_SPOTS = 1
-MAX_SPOTS = 2
-
-# Places Nearby Search タイムアウト（秒）。
 _TIMEOUT_SEC = 6
 _NEARBY_URL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+_DIRECTIONS_URL = "https://maps.googleapis.com/maps/api/directions/json"
 
-# セマンティックタグ → Places 検索クエリ（type or keyword）。
-# 実在しない Places type は keyword 検索にフォールバックする。
+_WALKING_MPS = 1.33
+_M_PER_DEG = 111_000.0
+
+# 雑居ビル・実用施設を弾くためのNGワードリスト
+EXCLUDE_WORDS = [
+    "歯科", "クリニック", "病院", "薬局", "整骨院", "鍼灸", 
+    "株式会社", "有限会社", "不動産", "パーキング", "駐車場", 
+    "ビル", "マンション", "ハイツ", "アパート", "教室", "スクール"
+]
+
 TAG_TO_QUERY: dict[str, dict[str, str]] = {
     "park": {"type": "park"},
     "cafe": {"type": "cafe"},
@@ -59,13 +51,12 @@ TAG_TO_QUERY: dict[str, dict[str, str]] = {
     "residential": {"keyword": "静かな通り"},
     "scenic_lookout": {"keyword": "見晴らし 展望"},
     "tree_lined_avenue": {"keyword": "並木道"},
+    # ↓追加：個人商店や商店街を狙うタグ
+    "local_shop": {"type": "store", "keyword": "商店街 OR 個人商店"},
 }
-
 
 @dataclass
 class Spot:
-    """正規化済みの経由スポット。"""
-
     name: str
     lat: float
     lng: float
@@ -79,19 +70,63 @@ class Spot:
         return asdict(self)
 
 
-def _midpoint(origin: dict, destination: dict) -> tuple[float, float]:
-    return (
-        (origin["lat"] + destination["lat"]) / 2.0,
-        (origin["lng"] + destination["lng"]) / 2.0,
-    )
+# --- ルート計算ヘルパー（Directions API） ---
 
+def _get_points_along_route(origin: dict, destination: dict, fractions: list[float]) -> list[tuple[float, float]]:
+    """Directions APIで最短ルートを引き、指定した割合(例: 0.35)にある緯度経度を返す"""
+    params = {
+        "origin": f"{origin['lat']},{origin['lng']}",
+        "destination": f"{destination['lat']},{destination['lng']}",
+        "mode": "walking",
+        "language": "ja",
+        "key": settings.GOOGLE_MAPS_SERVER_KEY,
+    }
+    try:
+        resp = requests.get(_DIRECTIONS_URL, params=params, timeout=_TIMEOUT_SEC)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("routes"):
+            return []
+        
+        # ルートの全ステップ（曲がり角ごとの区間）を取得
+        steps = data["routes"][0]["legs"][0]["steps"]
+        total_dist = sum(step["distance"]["value"] for step in steps)
+        
+        results = []
+        for frac in fractions:
+            target_dist = total_dist * frac
+            current_dist = 0
+            # 目標距離に到達するステップを探す
+            for step in steps:
+                step_dist = step["distance"]["value"]
+                if current_dist + step_dist >= target_dist:
+                    # そのステップの開始地点を拠点として採用
+                    loc = step["start_location"]
+                    results.append((loc["lat"], loc["lng"]))
+                    break
+                current_dist += step_dist
+                
+        return results
+    except Exception as exc:
+        logger.warning("Directions route fetch failed: %s", exc)
+        return []
+
+
+def _get_orthogonal_offset(origin: dict, destination: dict, offset_m: float) -> tuple[float, float]:
+    dlat = destination["lat"] - origin["lat"]
+    dlng = destination["lng"] - origin["lng"]
+    norm = math.hypot(dlat, dlng) or 1e-6
+    offset_deg = offset_m / _M_PER_DEG
+    return (-dlng / norm * offset_deg, dlat / norm * offset_deg)
+
+
+# --- API 通信・評価 ---
 
 def _nearby_search(lat: float, lng: float, query: dict) -> list[dict]:
-    """Places Nearby Search（open_now のみ）。失敗時は空リスト。"""
     params = {
         "location": f"{lat},{lng}",
         "radius": SEARCH_RADIUS_M,
-        "opennow": "true",  # docs: open_now:true のみ抽出
+        "opennow": "true",
         "language": "ja",
         "key": settings.GOOGLE_MAPS_SERVER_KEY,
     }
@@ -99,17 +134,9 @@ def _nearby_search(lat: float, lng: float, query: dict) -> list[dict]:
     try:
         resp = requests.get(_NEARBY_URL, params=params, timeout=_TIMEOUT_SEC)
         resp.raise_for_status()
-        data = resp.json()
-        status = data.get("status")
-        if status not in ("OK", "ZERO_RESULTS"):
-            logger.warning("Places API status=%s error=%s", status,
-                           data.get("error_message"))
-            return []
-        return data.get("results", [])
-    except (requests.RequestException, ValueError) as exc:
-        logger.warning("Places nearby search failed: %s", exc)
+        return resp.json().get("results", [])
+    except Exception:
         return []
-
 
 def _normalize(raw: dict, source_tag: str) -> Spot | None:
     try:
@@ -127,24 +154,46 @@ def _normalize(raw: dict, source_tag: str) -> Spot | None:
     except (KeyError, TypeError, ValueError):
         return None
 
-
 def _passes_anti_massproduced(spot: Spot) -> bool:
-    """アンチ量産型フィルタの中核。"""
     if spot.rating < MIN_RATING:
         return False
-    if spot.user_ratings_total > MAX_USER_RATINGS_TOTAL:
-        return False  # メジャーすぎ（誰でも同じ体験）を排除
-    if spot.user_ratings_total < MIN_USER_RATINGS_TOTAL:
-        return False  # 実体不明すぎる場所も避ける
+    if not (MIN_USER_RATINGS_TOTAL <= spot.user_ratings_total <= MAX_USER_RATINGS_TOTAL):
+        return False
+        
+    # 【最重要】エモくない雑居ビル・病院・会社を名前で徹底排除
+    if any(ng_word in spot.name for ng_word in EXCLUDE_WORDS):
+        return False
+        
     return True
 
-
 def _hidden_gem_score(spot: Spot) -> float:
-    """“知る人ぞ知る”度合い。高 rating × 少なめレビューを上位に。"""
-    # rating を主軸に、レビューが少ないほど加点（量産型ペナルティの逆）。
     scarcity = 1.0 - min(spot.user_ratings_total, MAX_USER_RATINGS_TOTAL) / MAX_USER_RATINGS_TOTAL
-    return spot.rating + scarcity * 1.5
+    return spot.rating + scarcity * 2.0  # マイナー度合いの評価を少し強める
 
+
+def _search_best_spot(lat: float, lng: float, tag: str, ctx: safety.SafetyContext, seen: set) -> Spot | None:
+    query = TAG_TO_QUERY.get(tag, {"keyword": tag})
+    candidates = []
+    for raw in _nearby_search(lat, lng, query):
+        spot = _normalize(raw, tag)
+        if not spot or spot.place_id in seen:
+            continue
+        if not _passes_anti_massproduced(spot):
+            continue
+        if not safety.is_spot_safe(spot.to_dict(), ctx):
+            continue
+        candidates.append(spot)
+    
+    if not candidates:
+        return None
+        
+    candidates.sort(key=_hidden_gem_score, reverse=True)
+    best = candidates[0]
+    seen.add(best.place_id)
+    return best
+
+
+# --- メインロジック ---
 
 def select_spots(
     origin: dict,
@@ -153,118 +202,149 @@ def select_spots(
     ctx: safety.SafetyContext,
     target_extra_minutes: int = 15,
 ) -> list[dict]:
-    """周辺探索 → アンチ量産型 + 安全フィルタ → 1〜2 件を選定。
-
-    origin/destination は {"lat": float, "lng": float}。
-    Places キー未設定・結果ゼロ時はフォールバック経由地を返す。
-    target_extra_minutes はフォールバック合成時の遠回り量の目安に使う。
-    """
+    
     if not settings.GOOGLE_MAPS_SERVER_KEY:
-        return _fallback_spots(origin, destination, places_tags, ctx,
-                               target_extra_minutes)
+        return _fallback_zigzag(origin, destination, places_tags, ctx, target_extra_minutes)
 
-    lat, lng = _midpoint(origin, destination)
-    # 安全上、夜間・悪天候で危険なタグは探索前に落とす。
-    safe_tags = safety.filter_tags(places_tags, ctx)
+    safe_tags = safety.filter_tags(places_tags, ctx) or ["park", "local_shop"]
+    has_conv = "convenience_store" in safe_tags
 
-    seen: set[str] = set()
-    candidates: list[Spot] = []
-    for tag in safe_tags:
-        query = TAG_TO_QUERY.get(tag, {"keyword": tag})
-        for raw in _nearby_search(lat, lng, query):
-            spot = _normalize(raw, tag)
-            if not spot or spot.place_id in seen:
-                continue
-            if not _passes_anti_massproduced(spot):
-                continue
-            if not safety.is_spot_safe(spot.to_dict(), ctx):
-                continue
-            seen.add(spot.place_id)
-            candidates.append(spot)
+    # 最大スポット数を割り出す（夜間または目標追加時間が5分以下の場合は最大1件、それ以外は最大2件）
+    max_spots = 1 if (ctx.is_night or target_extra_minutes <= 5) else 2
 
-    if not candidates:
-        return _fallback_spots(origin, destination, places_tags, ctx)
+    seen_ids: set[str] = set()
+    spots_obj: list[Spot] = []
 
-    if len(candidates) < MIN_SPOTS:
-        return _fallback_spots(origin, destination, places_tags, ctx,
-                               target_extra_minutes)
+    if has_conv:
+        # 1. コンビニがある場合は 35%（序盤）, 50%（中盤）, 75%（終盤）の3点を取得
+        route_points = _get_points_along_route(origin, destination, [0.35, 0.50, 0.75])
+        if not route_points or len(route_points) < 3:
+            return _fallback_zigzag(origin, destination, safe_tags, ctx, target_extra_minutes)
 
-    candidates.sort(key=_hidden_gem_score, reverse=True)
-    chosen = candidates[:MAX_SPOTS]
-    return [s.to_dict() for s in chosen]
+        lat_a, lng_a = route_points[0]
+        lat_mid, lng_mid = route_points[1]
+        lat_b, lng_b = route_points[2]
+
+        other_tags = [t for t in safe_tags if t != "convenience_store"]
+        if not other_tags:
+            other_tags = ["park"]
+        tag_a = other_tags[0]
+        tag_b = other_tags[1] if len(other_tags) > 1 else other_tags[0]
+
+        if max_spots == 1:
+            # 1件のみの場合は、中盤(50%)のコンビニのみを採用
+            spot_mid = _search_best_spot(lat_mid, lng_mid, "convenience_store", ctx, seen_ids)
+            if spot_mid:
+                spots_obj.append(spot_mid)
+            else:
+                spot_alt = _search_best_spot(lat_mid, lng_mid, tag_a, ctx, seen_ids)
+                if spot_alt:
+                    spots_obj.append(spot_alt)
+        else:
+            # 2件の場合は、「中盤(50%)にコンビニ ＋ 終盤(75%)に他スポット」の順で並べる（序盤・終盤のコンビニを回避）
+            spot_mid = _search_best_spot(lat_mid, lng_mid, "convenience_store", ctx, seen_ids)
+            spot_b = _search_best_spot(lat_b, lng_b, tag_b, ctx, seen_ids)
+
+            if spot_mid and spot_b:
+                spots_obj.append(spot_mid)
+                spots_obj.append(spot_b)
+            elif spot_mid:
+                # 終盤が見つからない場合は [序盤の他スポット, 中盤のコンビニ] とする
+                spot_a = _search_best_spot(lat_a, lng_a, tag_a, ctx, seen_ids)
+                if spot_a:
+                    spots_obj.append(spot_a)
+                spots_obj.append(spot_mid)
+            elif spot_b:
+                # コンビニが見つからない場合は通常の [序盤, 終盤] とする
+                spot_a = _search_best_spot(lat_a, lng_a, tag_a, ctx, seen_ids)
+                if spot_a:
+                    spots_obj.append(spot_a)
+                spots_obj.append(spot_b)
+            else:
+                # どちらも見つからない場合は [序盤] のみ
+                spot_a = _search_best_spot(lat_a, lng_a, tag_a, ctx, seen_ids)
+                if spot_a:
+                    spots_obj.append(spot_a)
+    else:
+        # コンビニがない通常の場合は 35%（序盤）, 75%（終盤）の2点を取得
+        route_points = _get_points_along_route(origin, destination, [0.35, 0.75])
+        if not route_points or len(route_points) < 2:
+            return _fallback_zigzag(origin, destination, safe_tags, ctx, target_extra_minutes)
+
+        lat_a, lng_a = route_points[0]
+        lat_b, lng_b = route_points[1]
+
+        tag_a = safe_tags[0]
+        tag_b = safe_tags[1] if len(safe_tags) > 1 else safe_tags[0]
+
+        spot_a = _search_best_spot(lat_a, lng_a, tag_a, ctx, seen_ids)
+        if spot_a:
+            spots_obj.append(spot_a)
+
+        if max_spots == 2:
+            spot_b = _search_best_spot(lat_b, lng_b, tag_b, ctx, seen_ids)
+            if spot_b:
+                spots_obj.append(spot_b)
+
+    if not spots_obj:
+        return _fallback_zigzag(origin, destination, safe_tags, ctx, target_extra_minutes)
+
+    # 4. 余韻ピン（目的地直前のダミーピン）
+    extra_m = max(target_extra_minutes, 1) * 60 * _WALKING_MPS
+    offset_m = min(extra_m / 4.0, 300) 
+    lat_c = origin["lat"] + (destination["lat"] - origin["lat"]) * 0.90
+    lng_c = origin["lng"] + (destination["lng"] - origin["lng"]) * 0.90
+    perp_lat, perp_lng = _get_orthogonal_offset(origin, destination, offset_m)
+    
+    dummy_afterglow = Spot(
+        name="余韻の路地",
+        lat=lat_c + perp_lat, 
+        lng=lng_c + perp_lng,
+        rating=0.0,
+        user_ratings_total=0,
+        place_id="dummy-afterglow-pin",
+        tags=["residential"],
+        source_tag="residential"
+    )
+    spots_obj.append(dummy_afterglow)
+
+    return [s.to_dict() for s in spots_obj]
 
 
-# ---------------------------------------------------------------------------
-# フォールバック（キー未設定・探索ゼロ時）
-#   中点から少しずらした合成経由地を返し、下流の Directions を成立させる。
-# ---------------------------------------------------------------------------
-# 徒歩速度（directions.py と揃える）。フォールバックの分↔距離換算に使う。
-_WALKING_MPS = 1.33
-# 緯度1度 ≒ 111km。経度も日本付近の概算として同値で扱う（合成用途に十分）。
-_M_PER_DEG = 111_000.0
-
-
-def _fallback_spots(
+def _fallback_zigzag(
     origin: dict,
     destination: dict,
-    places_tags: list[str],
+    safe_tags: list[str],
     ctx: safety.SafetyContext,
-    target_extra_minutes: int = 15,
+    target_extra_minutes: int,
 ) -> list[dict]:
-    import math
-
-    dlat = destination["lat"] - origin["lat"]
-    dlng = destination["lng"] - origin["lng"]
-    norm = math.hypot(dlat, dlng) or 1e-6
-
-    # 目標追加分 → 追加距離(m) → 三角形の頂点までの直交オフセット h を逆算する。
-    #   最短直線 D に対し、中点で h だけ膨らむと detour ≒ 2*sqrt((D/2)^2 + h^2)。
-    #   extra = detour - D を target に合わせて h を解く。
-    direct_m = norm * _M_PER_DEG
+    tag = safe_tags[0] if safe_tags else "residential"
     extra_m = max(target_extra_minutes, 1) * 60 * _WALKING_MPS
-    half = direct_m / 2.0
-    h_m = math.sqrt(max((half + extra_m / 2.0) ** 2 - half**2, 0.0))
-    # h を degree に。進行方向 (dlat,dlng) の直交単位ベクトルは (-dlng, dlat)/norm。
-    offset_deg = h_m / _M_PER_DEG
-    perp_lat = -dlng / norm * offset_deg
-    perp_lng = dlat / norm * offset_deg
-
-    safe_tags = safety.filter_tags(places_tags, ctx) or ["park"]
-    tag = safe_tags[0]
-    count = 1 if ctx.is_night else min(MAX_SPOTS, 2)
-
-    # 経由スポットは「同じ側」に配置して 1 つのふくらみ（bump）を作る。
-    # 1件なら中点、2件なら 42%/58% 地点に置き、頂点付近で 2 スポットを通す。
-    fractions = [0.5] if count == 1 else [0.42, 0.58]
-
-    # タグごとに 2 つの呼び名を用意し、複数スポットが重複しないようにする。
-    labels = {
-        "park": ["静かな小さな公園", "誰もいない児童公園"],
-        "cafe": ["路地裏の喫茶店", "灯りの残るカフェ"],
-        "convenience_store": ["灯りのコンビニ", "夜更けのコンビニ"],
-        "river": ["川沿いの遊歩道", "橋のたもとの水辺"],
-        "waterfront": ["水辺のベンチ", "静かな岸辺"],
-        "promenade": ["誰もいない遊歩道", "街灯の並ぶ小道"],
-        "garden": ["小さな庭園", "手入れされた植え込み"],
-        "scenic_lookout": ["小さな見晴らし", "坂の上の眺め"],
-        "tree_lined_avenue": ["名もなき並木道", "銀杏の裏通り"],
-        "bench": ["路地のベンチ", "木陰のベンチ"],
-        "residential": ["静かな住宅街", "灯りのともる路地"],
-    }
-    names = labels.get(tag, ["寄り道スポット", "もうひとつの寄り道"])
+    amplitude_m = extra_m / 4.0 
+    perp_lat, perp_lng = _get_orthogonal_offset(origin, destination, amplitude_m)
+    
+    waypoints = [
+        {"frac": 0.25, "mult": 1.0, "name": "静かな曲がり角"},
+        {"frac": 0.50, "mult": -1.0, "name": "裏路地の入り口"},
+        {"frac": 0.75, "mult": 1.0, "name": "名もなき細道"},
+    ]
+    if ctx.is_night:
+        waypoints = [{"frac": 0.50, "mult": 1.0, "name": "夜の寄り道"}]
+        
     spots: list[dict] = []
-    for i, frac in enumerate(fractions):
-        base_lat = origin["lat"] + dlat * frac
-        base_lng = origin["lng"] + dlng * frac
+    for i, wp in enumerate(waypoints):
+        base_lat = origin["lat"] + (destination["lat"] - origin["lat"]) * wp["frac"]
+        base_lng = origin["lng"] + (destination["lng"] - origin["lng"]) * wp["frac"]
         spot = Spot(
-            name=names[i % len(names)],
-            lat=base_lat + perp_lat,
-            lng=base_lng + perp_lng,
-            rating=round(4.1 + 0.2 * i, 1),
-            user_ratings_total=42 - 9 * i,
-            place_id=f"fallback-{tag}-{i}",
+            name=wp["name"],
+            lat=base_lat + (perp_lat * wp["mult"]),
+            lng=base_lng + (perp_lng * wp["mult"]),
+            rating=4.0,
+            user_ratings_total=10,
+            place_id=f"zigzag-fallback-{i}",
             tags=[tag],
             source_tag=tag,
         )
         spots.append(spot.to_dict())
+        
     return spots

@@ -62,7 +62,11 @@ class SafetyContext:
 
 def is_night_now(now: datetime | None = None) -> bool:
     """現在（またはローカル指定時刻）が夜間かどうか。"""
-    now = now or datetime.now()
+    if now is None:
+        import datetime as dt
+        # 日本時間 (UTC+9) を明示的に取得
+        jst = dt.timezone(dt.timedelta(hours=9))
+        now = dt.datetime.now(jst)
     t = now.time()
     if NIGHT_START <= NIGHT_END:
         return NIGHT_START <= t < NIGHT_END

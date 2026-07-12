@@ -117,8 +117,16 @@ def analyze_emotion(text: str, preset: str | None = None) -> er.EmotionAnalysis:
 
     Gemini 失敗時はキーワードベースのフォールバックへ委譲する。
     """
+    input_parts = []
+    if preset:
+        input_parts.append(f"選択された気分ボタン: {preset}")
+    if text:
+        input_parts.append(f"自由記述テキスト: {text}")
+    
+    input_text = "\n".join(input_parts) if input_parts else "（未入力）"
+
     raw = _call_generate(
-        _ANALYZE_INSTRUCTION + "\n" + (text or "（未入力）"),
+        _ANALYZE_INSTRUCTION + "\n" + input_text,
         system=_ANALYZE_SYSTEM,
         temperature=0.3,
     )
