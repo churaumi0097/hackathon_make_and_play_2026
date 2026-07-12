@@ -9,4 +9,5 @@ urlpatterns = [
     path("analyze", views.analyze, name="analyze"),
     path("route", views.route, name="route"),
     path("result", views.result, name="result"),
+    path("geocode", views.geocode, name="geocode"),
 ]

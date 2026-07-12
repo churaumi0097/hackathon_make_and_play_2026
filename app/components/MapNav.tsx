@@ -57,6 +57,8 @@ function GoogleOverlays({
     });
     overlaysRef.current.push(shortest, detour);
 
+    const infoWindow = new google.maps.InfoWindow();
+
     route.spots.forEach((s) => {
       const m = new google.maps.Marker({
         position: { lat: s.lat, lng: s.lng },
@@ -71,6 +73,30 @@ function GoogleOverlays({
           strokeWeight: 3,
         },
       });
+
+      m.addListener("click", () => {
+        let content = "";
+        if (s.place_id === "dummy-afterglow-pin") {
+          content = `
+            <div style="color: #16181c; font-family: sans-serif; padding: 4px 8px;">
+              <div style="font-weight: 700; font-size: 14px;">${s.name}</div>
+              <div style="font-size: 12px; color: #656d76; margin-top: 2px;">もうすぐ目的地。最後の余韻を楽しんでね。</div>
+            </div>
+          `;
+        } else {
+          content = `
+            <div style="color: #16181c; font-family: sans-serif; padding: 4px 8px;">
+              <div style="font-weight: 700; font-size: 14px; margin-bottom: 2px;">${s.name}</div>
+              <div style="font-size: 12px; color: #656d76;">
+                評価: ⭐️${s.rating.toFixed(1)} (${s.user_ratings_total}件のレビュー)
+              </div>
+            </div>
+          `;
+        }
+        infoWindow.setContent(content);
+        infoWindow.open(map, m);
+      });
+
       overlaysRef.current.push(m as unknown as google.maps.MVCObject);
     });
 
@@ -108,6 +134,7 @@ function GoogleOverlays({
     return () => {
       overlaysRef.current.forEach((o) => (o as google.maps.Polyline).setMap(null));
       overlaysRef.current = [];
+      infoWindow.close();
     };
   }, [map, route, active]);
 

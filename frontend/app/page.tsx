@@ -35,12 +35,15 @@ export default function Home() {
     setError(null);
     setPhase("loading");
     try {
+      const localHour = new Date().getHours();
+      const isNight = localHour >= 19 || localHour < 6;
       const res = await fetchRoute({
         text: v.text,
         preset: v.preset,
         intensity: v.intensity,
         origin: v.origin,
         destination: v.destination,
+        is_night: isNight,
       });
       setRoute(res);
       setPhase("nav");

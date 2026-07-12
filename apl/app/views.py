@@ -149,3 +149,27 @@ def result(request):
         },
         status=status.HTTP_200_OK,
     )
+
+
+@api_view(["GET"])
+def geocode(request):
+    """地名テキスト → {lat, lng, formatted_address}。"""
+    query = request.query_params.get("query", "").strip()
+    if not query:
+        return Response(
+            {"error": "query parameter is required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # サービス層からジオコーディングを実行
+    from .services import geocoder
+
+    res = geocoder.geocode_address(query)
+    if not res:
+        return Response(
+            {"error": f"Could not geocode query '{query}'"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    return Response(res)
+
