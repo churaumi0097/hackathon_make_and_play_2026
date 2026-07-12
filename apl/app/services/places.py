@@ -51,7 +51,6 @@ TAG_TO_QUERY: dict[str, dict[str, str]] = {
     "residential": {"keyword": "静かな通り"},
     "scenic_lookout": {"keyword": "見晴らし 展望"},
     "tree_lined_avenue": {"keyword": "並木道"},
-    # ↓追加：個人商店や商店街を狙うタグ
     "local_shop": {"type": "store", "keyword": "商店街 OR 個人商店"},
 }
 
@@ -134,8 +133,13 @@ def _nearby_search(lat: float, lng: float, query: dict) -> list[dict]:
     try:
         resp = requests.get(_NEARBY_URL, params=params, timeout=_TIMEOUT_SEC)
         resp.raise_for_status()
-        return resp.json().get("results", [])
-    except Exception:
+        data = resp.json()
+        status = data.get("status")
+        if status not in ("OK", "ZERO_RESULTS"):
+            logger.warning("Places API status=%s error=%s", status, data.get("error_message"))
+        return data.get("results", [])
+    except Exception as exc:
+        logger.warning("Places nearby search failed: %s", exc)
         return []
 
 def _normalize(raw: dict, source_tag: str) -> Spot | None:
