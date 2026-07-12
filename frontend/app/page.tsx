@@ -1,197 +1,87 @@
 "use client";
 
-// アプリ全体のオーケストレーション。
-// 感情入力 → (ローディング/route) → 地図ナビ → リザルト、の状態遷移を管理。
-// 起動時にバックエンド /api/health を叩いて疎通を確認する（task 0）。
-
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import EmotionInput, { type EmotionSubmit } from "./components/EmotionInput";
 import LoadingScreen from "./components/LoadingScreen";
 import MapNav from "./components/MapNav";
 import ResultScreen from "./components/ResultScreen";
-import { fetchHealth, fetchRoute } from "./lib/api";
+import { fetchGeocode, fetchHealth, fetchRoute } from "./lib/api";
 import type { RouteResponse } from "./lib/types";
+import styles from "./page.module.css";
 
-type Phase = "input" | "loading" | "nav" | "result";
+type Phase = "landing" | "input" | "loading" | "nav" | "result";
 type Health = "checking" | "ok" | "down";
 
 export default function Home() {
-  const [phase, setPhase] = useState<Phase>("input");
+  const [phase, setPhase] = useState<Phase>("landing");
   const [route, setRoute] = useState<RouteResponse | null>(null);
   const [emotionText, setEmotionText] = useState("");
   const [extraMinutes, setExtraMinutes] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [health, setHealth] = useState<Health>("checking");
+  const [formStep, setFormStep] = useState<0 | 1>(0);
 
-  // 起動時ヘルスチェック（フロント⇔バック疎通の確認）
   useEffect(() => {
-    fetchHealth()
-      .then((h) => setHealth(h.status === "ok" ? "ok" : "down"))
-      .catch(() => setHealth("down"));
+    fetchHealth().then((response) => setHealth(response.status === "ok" ? "ok" : "down")).catch(() => setHealth("down"));
   }, []);
 
-  const handleSubmit = async (v: EmotionSubmit) => {
-    setEmotionText(v.text);
+  const handleSubmit = async (value: EmotionSubmit) => {
+    setEmotionText(value.text);
     setError(null);
     setPhase("loading");
     try {
-      const res = await fetchRoute({
-        text: v.text,
-        preset: v.preset,
-        intensity: v.intensity,
-        origin: v.origin,
-        destination: v.destination,
-      });
-      setRoute(res);
+      const destination = typeof value.destination === "string" ? await fetchGeocode(value.destination) : value.destination;
+      const response = await fetchRoute({ text: value.text, preset: value.preset, intensity: value.intensity, origin: value.origin, destination });
+      setRoute(response);
       setPhase("nav");
     } catch {
-      setError(
-        "うまくつながらなかったみたい。少し待って、もう一度ためしてね。",
-      );
-      // エラーは loading 画面に表示したままにする
+      setError("うまくつながらなかったみたい。少し待って、もう一度ためしてみてね。");
     }
   };
 
-  const handleArrive = (actualExtra: number) => {
-    setExtraMinutes(actualExtra);
-    setPhase("result");
-  };
-
   const handleRestart = () => {
-    setRoute(null);
-    setError(null);
-    setExtraMinutes(0);
-    setPhase("input");
+    setRoute(null); setError(null); setExtraMinutes(0); setFormStep(0); setPhase("input");
   };
 
-  // 地図画面はフルブリード（全幅で地図を表示）。それ以外はブランドフレーム内。
-  if (phase === "nav" && route) {
-    return (
-      <>
-        <HealthBadge health={health} />
-        <MapNav route={route} onArrive={handleArrive} onRestart={handleRestart} />
-      </>
-    );
-  }
+  if (phase === "landing") return <LandingPage onStart={() => setPhase("input")} />;
+  if (phase === "nav" && route) return <><HealthBadge health={health} /><MapNav route={route} onArrive={(minutes) => { setExtraMinutes(minutes); setPhase("result"); }} onRestart={handleRestart} /></>;
 
   return (
-    <AppFrame>
+    <AppFrame onHome={() => setPhase("landing")} panelMode={formStep === 1 ? "route" : "mood"}>
       <HealthBadge health={health} />
-      {phase === "input" && <EmotionInput onSubmit={handleSubmit} />}
+      {phase === "input" && <EmotionInput onSubmit={handleSubmit} onStepChange={setFormStep} />}
       {phase === "loading" && <LoadingScreen error={error} />}
-      {phase === "result" && route && (
-        <ResultScreen
-          route={route}
-          emotionText={emotionText}
-          extraMinutes={extraMinutes}
-          onRestart={handleRestart}
-        />
-      )}
-
-      {/* loading でエラーが出た場合の戻る導線 */}
-      {phase === "loading" && error && (
-        <div className="safe-exit">
-          <button className="btn btn-ghost" onClick={handleRestart}>
-            入力に戻る
-          </button>
-        </div>
-      )}
+      {phase === "result" && route && <ResultScreen route={route} emotionText={emotionText} extraMinutes={extraMinutes} onRestart={handleRestart} />}
+      {phase === "loading" && error && <div className="safe-exit"><button className="btn btn-ghost" onClick={handleRestart}>入力に戻る</button></div>}
     </AppFrame>
   );
 }
 
-// デスクトップ＝左ブランドヒーロー＋右コンテンツ、モバイル＝緑ヘッダー＋縦積み。
-function AppFrame({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="frame">
-      <aside className="frame-brand">
-        <div className="brand-badge" aria-hidden>
-          🍃
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div className="brand-name">Anti-ShortCut</div>
-          <div
-            className="brand-full"
-            style={{ marginTop: 20, maxWidth: 380 }}
-          >
-            <h2
-              style={{
-                fontSize: 30,
-                fontWeight: 800,
-                lineHeight: 1.4,
-                margin: "0 0 14px",
-                letterSpacing: "-0.01em",
-              }}
-            >
-              その寄り道が、
-              <br />
-              今日のあなたを肯定する。
-            </h2>
-            <p style={{ fontSize: 16, lineHeight: 1.8, margin: 0, opacity: 0.92 }}>
-              最短ルートを、あえて選ばない。
-              <br />
-              いまの気分に寄り添う遠回りを、そっと提案します。
-            </p>
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-                marginTop: 26,
-              }}
-            >
-              {["感情でルート", "夜間セーフガード", "がんばりを可視化"].map((t) => (
-                <span
-                  key={t}
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    padding: "7px 14px",
-                    borderRadius: 999,
-                    background: "rgba(255,255,255,0.16)",
-                    border: "1px solid rgba(255,255,255,0.3)",
-                  }}
-                >
-                  {t}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      </aside>
-      <main className="frame-content">{children}</main>
-    </div>
-  );
+function LandingPage({ onStart }: { onStart: () => void }) {
+  return <main className={styles.landing}>
+    <nav className={styles.nav} aria-label="メインナビゲーション"><button className={styles.logo} type="button" aria-label="トップへ"><span className={styles.logoMark} aria-hidden="true">↗</span><span>Anti-shortcut</span></button></nav>
+    <section className={styles.hero}>
+      <Image className={styles.heroImage} src="/anti-shortcut-hero-v7.png" alt="寄り道ルートを示す街並みと、スマートフォンを見ながら歩く人物のイラスト" fill priority unoptimized sizes="100vw" />
+      <div className={styles.imageShade} aria-hidden="true" />
+      <div className={styles.heroContent}>
+        <p className={styles.kicker}>寄り道ナビゲーション</p>
+        <h1><span>いつもとは違う道に、</span><span>今日だけの発見を。</span></h1>
+        <p className={styles.lead}>気分と時間を選ぶだけ。いつもの最短ルートから少し外れて、あなたにちょうどいい寄り道を提案します。</p>
+        <div className={styles.actions}><button className={styles.primaryCta} type="button" onClick={onStart}>今日の寄り道をはじめる<span aria-hidden="true">→</span></button><span className={styles.timeNote}>約1分でルート提案</span></div>
+      </div>
+    </section>
+  </main>;
+}
+
+function AppFrame({ children, onHome, panelMode }: { children: React.ReactNode; onHome: () => void; panelMode: "mood" | "route" }) {
+  return <div className="frame"><aside className={`frame-brand ${panelMode === "route" ? "frame-brand-route" : ""}`}>
+    <button className={styles.appLogo} type="button" onClick={onHome}><span className="brand-badge" aria-hidden="true">↗</span><span className="brand-name">Anti-shortcut</span></button>
+    <div className="brand-full"><h2 className={styles.frameTitle}>その寄り道が、<br />今日を少し変える。</h2><p className={styles.frameCopy}>最短ルートを、あえて選ばない。<br />いまの気分に寄り添う道を提案します。</p></div>
+  </aside><main className="frame-content">{children}</main></div>;
 }
 
 function HealthBadge({ health }: { health: Health }) {
-  // アオイ向けに、細かい技術ラベルは出さず控えめなドットだけ（開発時の目印）。
-  const color = {
-    checking: "var(--ink-faint)",
-    ok: "var(--ok)",
-    down: "var(--danger)",
-  }[health];
-  const title = {
-    checking: "接続確認中",
-    ok: "サーバー接続OK",
-    down: "サーバー未接続",
-  }[health];
-  return (
-    <div
-      title={title}
-      style={{
-        position: "fixed",
-        top: 12,
-        right: 14,
-        zIndex: 100,
-        width: 8,
-        height: 8,
-        borderRadius: "50%",
-        background: color,
-        boxShadow: `0 0 8px ${color}`,
-        opacity: 0.7,
-        pointerEvents: "none",
-      }}
-    />
-  );
+  const label = { checking: "接続確認中", ok: "サーバー接続OK", down: "サーバー未接続" }[health];
+  return <span className={`${styles.health} ${styles[health]}`} title={label} />;
 }

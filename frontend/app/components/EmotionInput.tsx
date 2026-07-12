@@ -1,27 +1,22 @@
 "use client";
 
-// 感情入力画面（requirements ①）。
-// ペルソナ「アオイ」向け：複雑な設定・細かい文字を避け、大きく・少ない選択で。
-// フリーテキスト＋プリセット感情＋遠回り強度＋現在地(Geolocation)。
-// 目的地は既定で自動、必要な人だけ任意で開く。
-
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Intensity, LatLng } from "../lib/types";
+import styles from "./EmotionInput.module.css";
 
-// label はアオイ向けのやさしい表示、value はバックエンドのプリセット感情キー。
-const PRESETS: { label: string; emoji: string; value: string }[] = [
-  { label: "つかれた", emoji: "😮‍💨", value: "疲労" },
-  { label: "もやもや", emoji: "🌀", value: "不安" },
-  { label: "へこんだ", emoji: "😔", value: "悲しみ" },
-  { label: "うれしい", emoji: "😊", value: "歓喜" },
-  { label: "ほっとした", emoji: "🍵", value: "安堵" },
-  { label: "いらいら", emoji: "😤", value: "怒り" },
+const PRESETS = [
+  { label: "つかれた", description: "ひと息つきたい", emoji: "😮‍💨", value: "疲労", tone: "blue" },
+  { label: "もやもや", description: "頭を整理したい", emoji: "🌀", value: "不安", tone: "purple" },
+  { label: "へこんだ", description: "静かに歩きたい", emoji: "😔", value: "悲しみ", tone: "navy" },
+  { label: "うれしい", description: "気分を広げたい", emoji: "😊", value: "歓喜", tone: "yellow" },
+  { label: "ほっとした", description: "ゆっくり味わいたい", emoji: "🍵", value: "安堵", tone: "green" },
+  { label: "いらいら", description: "気持ちを切り替えたい", emoji: "😤", value: "怒り", tone: "red" },
 ];
 
-const INTENSITY_LABELS: { key: Intensity; label: string; emoji: string; sub: string }[] = [
-  { key: "light", label: "ちょっと", emoji: "🍃", sub: "5分くらい" },
-  { key: "medium", label: "ほどよく", emoji: "🌿", sub: "15分くらい" },
-  { key: "deep", label: "たっぷり", emoji: "🌳", sub: "30分くらい" },
+const INTENSITIES: { key: Intensity; label: string; minutes: string }[] = [
+  { key: "light", label: "ちょっと", minutes: "+5分" },
+  { key: "medium", label: "ほどよく", minutes: "+15分" },
+  { key: "deep", label: "たっぷり", minutes: "+30分" },
 ];
 
 export type EmotionSubmit = {
@@ -29,7 +24,7 @@ export type EmotionSubmit = {
   preset: string | null;
   intensity: Intensity;
   origin: LatLng;
-  destination: LatLng;
+  destination: LatLng | string;
 };
 
 type GeoState =
@@ -37,17 +32,15 @@ type GeoState =
   | { status: "ready"; coords: LatLng }
   | { status: "error"; message: string };
 
-export default function EmotionInput({
-  onSubmit,
-}: {
-  onSubmit: (v: EmotionSubmit) => void;
-}) {
+export default function EmotionInput({ onSubmit, onStepChange }: { onSubmit: (value: EmotionSubmit) => void; onStepChange?: (step: 0 | 1) => void }) {
   const [text, setText] = useState("");
-  const [preset, setPreset] = useState<string | null>(null);
+  const [presets, setPresets] = useState<string[]>([]);
   const [intensity, setIntensity] = useState<Intensity>("medium");
   const [geo, setGeo] = useState<GeoState>({ status: "loading" });
   const [showDest, setShowDest] = useState(false);
   const [destText, setDestText] = useState("");
+  const [step, setStep] = useState<0 | 1>(0);
+  const touchStartX = useRef<number | null>(null);
 
   const runGeolocation = () => {
     if (!("geolocation" in navigator)) {
@@ -55,19 +48,10 @@ export default function EmotionInput({
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        setGeo({
-          status: "ready",
-          coords: { lat: pos.coords.latitude, lng: pos.coords.longitude },
-        }),
+      (position) => setGeo({ status: "ready", coords: { lat: position.coords.latitude, lng: position.coords.longitude } }),
       () => setGeo({ status: "error", message: "現在地をオンにしてね" }),
       { enableHighAccuracy: true, timeout: 8000 },
     );
-  };
-
-  const requestLocation = () => {
-    setGeo({ status: "loading" });
-    runGeolocation();
   };
 
   useEffect(() => {
@@ -75,210 +59,112 @@ export default function EmotionInput({
     runGeolocation();
   }, []);
 
-  const parseDestination = (origin: LatLng): LatLng => {
-    const m = destText.trim().match(/^\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*$/);
-    if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
-    // 既定：現在地の少し先（おうち方向のデモ地点）。
+  useEffect(() => {
+    const formPane = document.querySelector<HTMLElement>(".frame-content");
+    formPane?.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    onStepChange?.(step);
+  }, [step, onStepChange]);
+
+  const parseDestination = (origin: LatLng): LatLng | string => {
+    const match = destText.trim().match(/^\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*$/);
+    if (match) return { lat: parseFloat(match[1]), lng: parseFloat(match[2]) };
+    if (destText.trim()) return destText.trim();
     return { lat: origin.lat + 0.012, lng: origin.lng + 0.011 };
   };
 
-  const canSubmit = geo.status === "ready";
-
   const handleSubmit = () => {
     if (geo.status !== "ready") return;
-    onSubmit({
-      text: text.trim(),
-      preset,
-      intensity,
-      origin: geo.coords,
-      destination: parseDestination(geo.coords),
-    });
+    onSubmit({ text: text.trim(), preset: presets.length ? presets.join("、") : null, intensity, origin: geo.coords, destination: parseDestination(geo.coords) });
+  };
+
+  const handleTouchEnd = (endX: number) => {
+    if (touchStartX.current === null) return;
+    const distance = endX - touchStartX.current;
+    if (distance < -55 && step === 0) setStep(1);
+    if (distance > 55 && step === 1) setStep(0);
+    touchStartX.current = null;
   };
 
   return (
-    <div className="shell" style={{ padding: "36px 22px 44px" }}>
-      <header className="fade-in" style={{ marginBottom: 30 }}>
-        <div style={{ fontSize: 30, marginBottom: 12 }} aria-hidden>
-          🌙
-        </div>
-        <h1
-          className="serif"
-          style={{ fontSize: 32, lineHeight: 1.45, margin: 0, fontWeight: 700 }}
-        >
-          おつかれさま。
-          <br />
-          いま、どんな気分？
-        </h1>
-        <p style={{ color: "var(--ink-muted)", fontSize: 16, margin: "12px 0 0" }}>
-          最短ルートは、いったん忘れていいよ。
-        </p>
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <span className={styles.step}>ROUTE SETTING</span>
+        <h1>おつかれさま。<br />今日はどんな気分？</h1>
+        <p>いまの気持ちに、ちょうどいい寄り道をつくります。</p>
       </header>
 
-      {/* プリセット感情（大きめタップ・絵文字つき） */}
-      <section className="fade-in" style={{ marginBottom: 26 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-          {PRESETS.map((p) => {
-            const active = preset === p.value;
+      <div className={styles.progress} aria-label={`入力ステップ ${step + 1}/2`}>
+        <button type="button" className={step === 0 ? styles.currentStep : styles.doneStep} onClick={() => setStep(0)}><span>1</span>今の気分を選ぶ</button>
+        <span className={styles.progressLine} />
+        <button type="button" className={step === 1 ? styles.currentStep : ""} onClick={() => setStep(1)}><span>2</span>ルートを設定する</button>
+      </div>
+
+      <div className={styles.slider} onTouchStart={(event) => { touchStartX.current = event.changedTouches[0].clientX; }} onTouchEnd={(event) => handleTouchEnd(event.changedTouches[0].clientX)}>
+        <div className={styles.track} style={{ transform: `translateX(-${step * 50}%)` }}>
+      <section className={`${styles.section} ${styles.slide}`} aria-labelledby="mood-title">
+        <div className={styles.sectionHeading}>
+          <div><span className={styles.number}>01</span><h2 id="mood-title">今の気分を選ぶ</h2></div>
+          <span className={styles.optional}>複数選択できます</span>
+        </div>
+        <p className={styles.sectionLead}>いちばん近い気持ちはどれですか？</p>
+        <div className={styles.moodGrid}>
+          {PRESETS.map((item) => {
+            const active = presets.includes(item.value);
             return (
-              <button
-                key={p.value}
-                type="button"
-                onClick={() => setPreset(active ? null : p.value)}
-                style={{
-                  border: `1.5px solid ${active ? "var(--ember)" : "var(--line)"}`,
-                  background: active ? "var(--ember-glow)" : "transparent",
-                  color: active ? "var(--ember-strong)" : "var(--ink)",
-                  borderRadius: 999,
-                  padding: "12px 20px",
-                  fontSize: 17,
-                  minHeight: 52,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                <span style={{ fontSize: 20 }}>{p.emoji}</span>
-                {p.label}
+              <button key={item.value} type="button" aria-pressed={active} onClick={() => setPresets((current) => active ? current.filter((value) => value !== item.value) : [...current, item.value])} className={`${styles.mood} ${active ? styles.selected : ""}`}>
+                <span className={`${styles.moodEmoji} ${styles[item.tone]}`} aria-hidden="true">{item.emoji}</span>
+                <span className={styles.moodText}><strong>{item.label}</strong><small>{item.description}</small></span>
+                <span className={styles.check} aria-hidden="true">✓</span>
               </button>
             );
           })}
         </div>
-
-        {/* 言葉にしたい人だけ書ける、任意の自由入力 */}
-        <textarea
-          className="field"
-          style={{ marginTop: 14, fontSize: 17 }}
-          placeholder="言葉にできたら、ここに書いてもいいよ。"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={2}
-        />
-      </section>
-
-      {/* 遠回り強度 */}
-      <section className="fade-in" style={{ marginBottom: 26 }}>
-        <label
-          style={{ display: "block", color: "var(--ink)", fontSize: 17, marginBottom: 12 }}
-        >
-          どれくらい、寄り道する？
+        <label className={styles.noteLabel}>
+          <span>言葉にしたいことがあれば</span><span className={styles.optional}>任意</span>
+          <textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="ここに書いてもいいよ。" rows={2} />
         </label>
-        <div style={{ display: "flex", gap: 10 }}>
-          {INTENSITY_LABELS.map((it) => {
-            const active = intensity === it.key;
-            return (
-              <button
-                key={it.key}
-                type="button"
-                onClick={() => setIntensity(it.key)}
-                className="card"
-                style={{
-                  flex: 1,
-                  padding: "18px 8px",
-                  border: `1.5px solid ${active ? "var(--ember)" : "var(--line)"}`,
-                  boxShadow: active ? "0 8px 24px var(--ember-glow)" : "none",
-                  background: active
-                    ? "linear-gradient(180deg, rgba(240,169,92,0.18), rgba(240,169,92,0.05))"
-                    : undefined,
-                }}
-              >
-                <div style={{ fontSize: 26 }} aria-hidden>
-                  {it.emoji}
-                </div>
-                <div
-                  style={{
-                    fontSize: 17,
-                    fontWeight: 700,
-                    marginTop: 6,
-                    color: active ? "var(--ember-strong)" : "var(--ink)",
-                  }}
-                >
-                  {it.label}
-                </div>
-                <div style={{ fontSize: 13, color: "var(--ink-faint)", marginTop: 2 }}>
-                  {it.sub}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+        <div className={styles.selectionSummary}>{presets.length > 0 ? `${presets.length}個の気分を選択中` : "気分を1つ以上選んでください"}</div>
+        <button className={styles.next} type="button" onClick={() => setStep(1)} disabled={presets.length === 0}>ルート設定へ進む <span aria-hidden="true">→</span></button>
       </section>
 
-      {/* 現在地：生の数値は見せず、状態だけ大きく */}
-      <section className="fade-in" style={{ marginBottom: 24 }}>
-        <div
-          className="card"
-          style={{ padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}
-        >
-          <span style={{ fontSize: 22 }} aria-hidden>
-            📍
-          </span>
-          <div style={{ flex: 1 }}>
-            {geo.status === "ready" && (
-              <span style={{ fontSize: 16, color: "var(--ok)" }}>現在地、つかめたよ ✓</span>
-            )}
-            {geo.status === "loading" && (
-              <span style={{ fontSize: 16, color: "var(--ink-muted)" }}>現在地をさがしてるね…</span>
-            )}
-            {geo.status === "error" && (
-              <span style={{ fontSize: 16, color: "var(--danger)" }}>{geo.message}</span>
-            )}
+      <section className={`${styles.section} ${styles.slide}`} aria-labelledby="route-title">
+        <div className={styles.sectionHeading}>
+          <div><span className={styles.number}>02</span><h2 id="route-title">ルートを設定する</h2></div>
+        </div>
+
+        <div className={styles.locationGrid}>
+          <div className={styles.locationCard}>
+            <span className={styles.locationIcon} aria-hidden="true">⌖</span>
+            <div><span className={styles.locationLabel}>現在地</span>
+              {geo.status === "ready" && <strong className={styles.ready}>取得しました</strong>}
+              {geo.status === "loading" && <strong>確認しています…</strong>}
+              {geo.status === "error" && <strong className={styles.error}>{geo.message}</strong>}
+            </div>
+            {geo.status !== "ready" && <button type="button" className={styles.retry} onClick={() => { setGeo({ status: "loading" }); runGeolocation(); }}>再取得</button>}
           </div>
-          {geo.status !== "ready" && (
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={requestLocation}
-              style={{ borderRadius: 10, padding: "10px 14px", fontSize: 15, width: "auto" }}
-            >
-              もう一度
-            </button>
-          )}
+          <button type="button" className={styles.locationCard} onClick={() => setShowDest((open) => !open)}>
+            <span className={styles.locationIcon} aria-hidden="true">⌂</span>
+            <div><span className={styles.locationLabel}>目的地</span><strong>{destText ? "指定済み" : "自動で設定"}</strong></div>
+            <span className={styles.chevron} aria-hidden="true">{showDest ? "−" : "+"}</span>
+          </button>
         </div>
 
-        {/* 目的地は「任意」。ふだんは開かない。 */}
-        <button
-          type="button"
-          onClick={() => setShowDest((v) => !v)}
-          style={{
-            background: "none",
-            border: "none",
-            color: "var(--ink-faint)",
-            fontSize: 14,
-            padding: "10px 2px 0",
-          }}
-        >
-          {showDest ? "行き先を閉じる" : "行き先をきめる（なくてもOK）"}
-        </button>
-        {showDest && (
-          <input
-            className="field"
-            style={{ marginTop: 8, fontSize: 16 }}
-            placeholder="緯度,経度（例: 35.690,139.700）"
-            value={destText}
-            onChange={(e) => setDestText(e.target.value)}
-            inputMode="text"
-          />
-        )}
-      </section>
+        {showDest && <label className={styles.destination}><span>駅名・住所、または緯度経度</span><input value={destText} onChange={(event) => setDestText(event.target.value)} placeholder="例：東京駅 / 渋谷区役所 / 35.690, 139.700" inputMode="text" /></label>}
 
-      <button
-        className="btn"
-        style={{ minHeight: 64, fontSize: 19 }}
-        onClick={handleSubmit}
-        disabled={!canSubmit}
-      >
-        {canSubmit ? "さあ、歩きにいこう" : "現在地をさがしてるね…"}
-      </button>
-      <p
-        style={{
-          textAlign: "center",
-          color: "var(--ink-faint)",
-          fontSize: 13,
-          marginTop: 16,
-        }}
-      >
-        気持ちも居場所も、あなたのスマホの中だけ。
-      </p>
+        <div className={styles.detourHeading}><span>寄り道する時間</span><strong>{INTENSITIES.find((item) => item.key === intensity)?.minutes}</strong></div>
+        <div className={styles.intensity}>
+          {INTENSITIES.map((item) => <button key={item.key} type="button" aria-pressed={intensity === item.key} onClick={() => setIntensity(item.key)} className={intensity === item.key ? styles.activeIntensity : ""}><span>{item.label}</span><small>{item.minutes}</small></button>)}
+        </div>
+        <button className={styles.submit} type="button" onClick={handleSubmit} disabled={geo.status !== "ready"}>
+          <span>{geo.status === "ready" ? "今日の寄り道をつくる" : "現在地を確認しています"}</span><span aria-hidden="true">→</span>
+        </button>
+        <button className={styles.back} type="button" onClick={() => setStep(0)}><span aria-hidden="true">←</span> 気分を選び直す</button>
+      </section>
+        </div>
+      </div>
+
+      <p className={styles.privacy}>気持ちも居場所も、あなたのスマホの中だけ。</p>
     </div>
   );
 }

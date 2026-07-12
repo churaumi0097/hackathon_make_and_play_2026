@@ -86,19 +86,28 @@ button {
 
 .frame-brand {
   background:
-    radial-gradient(600px 320px at 85% 8%, rgba(255, 255, 255, 0.16), transparent 70%),
-    linear-gradient(158deg, #007a3d 0%, #00a349 55%, #00b14f 100%);
+    radial-gradient(520px 380px at 18% 12%, rgba(255, 190, 112, 0.2), transparent 68%),
+    linear-gradient(155deg, rgba(224, 91, 46, 0.58), rgba(193, 55, 27, 0.66)),
+    url("/emotion-panel-bg.png") center 58% / auto 112% no-repeat;
+  background-color: #d9542f;
   color: #ffffff;
   display: flex;
   align-items: center;
   gap: 14px;
   padding: 18px 20px;
 }
+
+.frame-brand-route {
+  background:
+    radial-gradient(520px 380px at 18% 12%, rgba(255, 190, 112, 0.2), transparent 68%),
+    linear-gradient(155deg, rgba(224, 91, 46, 0.58), rgba(193, 55, 27, 0.66)),
+    url("/route-panel-bg.png") center 58% / auto 112% no-repeat;
+  background-color: #d9542f;
+}
 @media (min-width: 900px) {
   .frame-brand {
-    position: sticky;
-    top: 0;
-    height: 100dvh;
+    min-height: 100dvh;
+    align-self: stretch;
     flex-direction: column;
     align-items: flex-start;
     justify-content: center;
@@ -116,8 +125,7 @@ button {
 }
 @media (min-width: 900px) {
   .frame-content {
-    height: 100dvh;
-    overflow-y: auto;
+    min-height: 100dvh;
     padding: 32px 0;
     align-items: flex-start;
   }

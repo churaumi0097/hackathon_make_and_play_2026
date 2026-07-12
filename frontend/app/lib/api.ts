@@ -2,6 +2,7 @@
 // シークレットは扱わない。呼ぶのは公開 API のみ。
 
 import type {
+  LatLng,
   ResultResponse,
   RouteRequest,
   RouteResponse,
@@ -36,6 +37,32 @@ export async function fetchHealth(): Promise<{ status: string; service: string }
 
 export function fetchRoute(req: RouteRequest): Promise<RouteResponse> {
   return postJSON<RouteResponse>("/route", req);
+}
+
+export async function fetchGeocode(query: string): Promise<LatLng> {
+  const params = new URLSearchParams({ query });
+  const res = await fetch(`${API_BASE}/geocode?${params.toString()}`, {
+    method: "GET",
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    throw new Error(`geocode failed (${res.status})`);
+  }
+
+  const data = (await res.json()) as {
+    lat?: unknown;
+    lng?: unknown;
+    location?: { lat?: unknown; lng?: unknown };
+  };
+  const lat = Number(data.lat ?? data.location?.lat);
+  const lng = Number(data.lng ?? data.location?.lng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    throw new Error("geocode response does not contain valid coordinates");
+  }
+
+  return { lat, lng };
 }
 
 export function fetchResult(req: {
